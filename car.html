@@ -43,11 +43,66 @@
         });
     })();
 
+    // utility
+    function sign(val) {
+        return val < 0? -1: 1;
+    }
+
+    /* CONTROLS */
+    var controller = null;
+
+    function determineCommand(params) {
+        var steerMultiplier = 1;
+        var steer = Math.abs(params.steer);
+        var steerDirection = params.steer? sign(params.steer): 0;
+        var throttle = Math.abs(params.throttle);
+        var direction = sign(params.throttle);
+
+        var steerBonus = (steer*steerMultiplier);
+        var maxThrottle = Math.min(1, throttle + steerBonus);
+        var minThrottle = throttle? maxThrottle - steerBonus: -maxThrottle;
+
+        if (maxThrottle !== 0) maxThrottle = maxThrottle * 0.5 + sign(maxThrottle) * 0.5;
+        if (minThrottle !== 0) minThrottle = minThrottle * 0.5 + sign(minThrottle) * 0.5;
+
+        var leftThrottle = (steerDirection < 0? minThrottle: maxThrottle) * direction;
+        var rightThrottle = (steerDirection > 0? minThrottle: maxThrottle) * direction;
+
+        leftThrottle = +leftThrottle.toFixed(2);
+        rightThrottle = +rightThrottle.toFixed(2);
+
+        return leftThrottle+':'+rightThrottle+';';
+    }
+
+    var commandInterval;
+    var lastCommand;
+
+    function sendCommandIfNeeded(params) {
+        var command = determineCommand(params);
+
+        if (lastCommand == command) return;
+
+        sendCommand(command);
+        lastCommand = command;
+
+        clearInterval(commandInterval);
+        commandInterval = setInterval(function() {
+            sendCommand(command);
+        }, 500);
+    }
+
+    function sendCommand(command) {
+        console.log('sending', command);
+
+        if (connected) socket.send(command);
+    }
 
     // gamepad
     var gamepadIndex;
 
     function checkGamepads() {
+        console.info('Checking gamepads...');
+
         var gamepads = navigator.getGamepads();
         var newGamepad = Array.prototype.filter.call(gamepads, function(gamepad) {
             return !!gamepad;
@@ -60,14 +115,17 @@
         }
         else gamepadIndex = newGamepadIndex;
 
-        console.log(gamepadIndex);
+        console.info('Gamepad index:', gamepadIndex);
     }
 
     window.addEventListener('gamepadconnected', checkGamepads);
     window.addEventListener('gamepaddisconnected', checkGamepads);
 
     function gamepadPollingLoop() {
-        if (gamepadIndex === undefined) return;
+        if (gamepadIndex === undefined) {
+            controller == null;
+            return;
+        }
 
         var gamepad = navigator.getGamepads()[gamepadIndex];
         var stickVal = gamepad.axes[0];
@@ -75,14 +133,14 @@
         var backThrottleVal = gamepad.buttons[6].value;
 
         var throttle = (Math.abs(throttleVal) > 0.1? throttleVal*0.9 + 0.1: 0) - (Math.abs(backThrottleVal) > 0.1? backThrottleVal*0.9 + 0.1: 0);
-        var steer = Math.abs(stickVal) > 0.3? stickVal*0.7 + 0.3: 0;
+        var steer = Math.abs(stickVal) > 0.3? (Math.abs(stickVal)*0.7 + 0.3) * sign(stickVal): 0;
 
-        console.log(throttle, steer);
+        if (throttle || steer) controller = 'gamepad';
 
-        if (connected) socket.send(determineCommand({
+        if (controller == 'gamepad') sendCommandIfNeeded({
             throttle: throttle,
             steer:steer
-        }));
+        });
 
         setTimeout(arguments.callee, 100);
     }
@@ -113,10 +171,6 @@
         keysState[keyMap[keyCode]] = false;
     }
 
-    function sign(val) {
-        return val < 0? -1: 1;
-    }
-
     function getKeyboardParams() {
         return {
             steer: keysState.right? 1: keysState.left? -1: 0,
@@ -124,37 +178,19 @@
         };
     }
 
-    function determineCommand(params) {
-        var steerMultiplier = 1;
-        var steer = Math.abs(params.steer);
-        var steerDirection = params.steer? sign(params.steer): 0;
-        var throttle = Math.abs(params.throttle);
-        var direction = sign(params.throttle);
-
-        var steerBonus = (steer*steerMultiplier);
-        var maxThrottle = Math.min(1, throttle + steerBonus);
-        var minThrottle = throttle? maxThrottle - steerBonus: -maxThrottle;
-
-        if (maxThrottle !== 0) maxThrottle = maxThrottle * 0.5 + sign(maxThrottle) * 0.5;
-        if (minThrottle !== 0) minThrottle = minThrottle * 0.5 + sign(minThrottle) * 0.5;
-
-        var leftThrottle = (steerDirection < 0? minThrottle: maxThrottle) * direction;
-        var rightThrottle = (steerDirection > 0? minThrottle: maxThrottle) * direction;
-
-        return leftThrottle+':'+rightThrottle+';';
-    }
-
     document.addEventListener('keydown', function(event) {
         if (event.keyCode in keyMap) {
+            controller = 'keyboard';
             setPressed(event.keyCode);
-            socket.send(determineCommand(getKeyboardParams()));
+            sendCommandIfNeeded(getKeyboardParams());
         }
     });
 
     document.addEventListener('keyup', function(event) {
         if (event.keyCode in keyMap) {
+            controller = 'keyboard';
             setDepressed(event.keyCode);
-            socket.send(determineCommand(getKeyboardParams()));
+            sendCommandIfNeeded(getKeyboardParams());
         }
     });
 })();
