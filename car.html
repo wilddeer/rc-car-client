@@ -105,7 +105,7 @@
 
         var gamepads = navigator.getGamepads();
         var newGamepad = Array.prototype.filter.call(gamepads, function(gamepad) {
-            return !!gamepad;
+            return !!gamepad && gamepad.mapping == 'standard';
         })[0];
         var newGamepadIndex = newGamepad && newGamepad.index;
 
